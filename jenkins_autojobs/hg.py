@@ -23,18 +23,23 @@ from jenkins_autojobs.job import Job
 # interpreter version
 hg_list_remote_py = '''
 from mercurial import ui, hg, node
+import time
 
 res = []
 peer = hg.peer(ui.ui(), {}, '%s')
+max_branch_age = %d * 24 * 60 * 60
 for name, rev in peer.branchmap().items():
-    res.append((name, node.short(rev[0])))
+    idx = peer.local().revs(node.short(rev[0]))[0]
+    age = time.time() - peer.local()[idx].date()[0]
+    if max_branch_age == 0 or age < max_branch_age:
+        res.append((name, node.short(rev[0])))
 print(repr(res))
 '''
 
 
-def hg_branch_iter_remote(repo, python):
+def hg_branch_iter_remote(repo, python, max_branch_age):
     with NamedTemporaryFile() as fh:
-        cmd = (hg_list_remote_py % repo).encode('utf8')
+        cmd = (hg_list_remote_py % (repo,max_branch_age)).encode('utf8')
         fh.write(cmd)
         fh.flush()
         out = check_output((python, fh.name))
@@ -43,7 +48,7 @@ def hg_branch_iter_remote(repo, python):
     return [i[0] for i in out]
 
 
-def hg_branch_iter_local(repo):
+def hg_branch_iter_local(repo, python, max_branch_age):
     cmd = ('hg', '-y', 'branches', '-c', '-R', repo)
     out = check_output(cmd).decode('utf8').split(linesep)
 
@@ -56,8 +61,9 @@ def list_branches(config):
     islocal = path.isdir(config['repo'])
     branch_iter = hg_branch_iter_local if islocal else hg_branch_iter_remote
     python = config.get('python', 'python')
+    max_branch_age = config.get('maxbranchage', 0)
 
-    return branch_iter(config['repo'], python)
+    return branch_iter(config['repo'], python, max_branch_age)
 
 
 def create_job(ref, template, config, ref_config):
